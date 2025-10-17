@@ -1,26 +1,22 @@
 import os
 import base64
-import mimetypes
 from pathlib import Path
+from dotenv import load_dotenv
 from datetime import datetime
 
-# Use the Gemini / Google GenAI SDK
-# Install via: pip install google-genai
+# Install this via: pip install google-genai python-dotenv
 from google import genai
-from google.genai import types
 
-# Load environment variables (e.g. from .env)
-from dotenv import load_dotenv
+# Load environment variables
 load_dotenv()
 
-# Read your Gemini API key (you may store it e.g. as GEMINI_API_KEY)
+# Read Gemini API key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise RuntimeError("Please set GEMINI_API_KEY in your environment")
+    raise RuntimeError("❌ Please set GEMINI_API_KEY in your environment or Space secrets.")
 
-# Configure the genai client
+# Initialize Gemini client (new official SDK style)
 client = genai.Client(api_key=GEMINI_API_KEY)
-
 
 # Directory for saving attachments
 TMP_DIR = Path("/tmp/llm_attachments")
@@ -53,14 +49,13 @@ def decode_attachments(attachments):
                 "size": len(data)
             })
         except Exception as e:
-            print("Failed to decode attachment", name, e)
+            print("⚠ Failed to decode attachment", name, e)
     return saved
 
 
 def summarize_attachments_meta(saved):
     """
-    saved is list from decode_attachments.
-    Returns a short human-readable summary string for the prompt.
+    Summarizes decoded attachments for the prompt.
     """
     lines = []
     for s in saved:
@@ -71,7 +66,6 @@ def summarize_attachments_meta(saved):
             if mime.startswith("text") or nm.endswith((".md", ".txt", ".json", ".csv")):
                 with open(p, "r", encoding="utf-8", errors="ignore") as f:
                     if nm.endswith(".csv"):
-                        # read first few lines
                         preview_lines = []
                         for _ in range(3):
                             try:
@@ -91,7 +85,7 @@ def summarize_attachments_meta(saved):
 
 
 def _strip_code_block(text: str) -> str:
-    """If text is inside triple-backticks, return the inner portion; else return as-is."""
+    """Remove markdown code fences if present."""
     if "```" in text:
         parts = text.split("```")
         if len(parts) >= 2:
@@ -100,6 +94,7 @@ def _strip_code_block(text: str) -> str:
 
 
 def generate_readme_fallback(brief: str, checks=None, attachments_meta=None, round_num=1):
+    """Fallback README if Gemini call fails."""
     checks_text = "\\n".join(checks or [])
     att_text = attachments_meta or ""
     return f"""# Auto-generated README (Round {round_num})
@@ -124,10 +119,9 @@ This README was generated as a fallback (Gemini did not return an explicit READM
 def generate_app_code(brief: str, attachments=None, checks=None,
                       round_num=1, prev_readme=None):
     """
-    Generate (or revise) an app using Gemini.
-
-    - round_num=1: build from scratch
-    - round_num=2: refactor based on new brief and previous README/code
+    Generate or revise a web app using Gemini.
+    round_num=1: build from scratch
+    round_num=2: refactor based on new brief and previous README/code
     """
     saved = decode_attachments(attachments or [])
     attachments_meta = summarize_attachments_meta(saved)
@@ -139,7 +133,7 @@ def generate_app_code(brief: str, attachments=None, checks=None,
             "Revise and enhance this project according to the new brief below.\n"
         )
 
-    # Build the user prompt to send to Gemini
+    # Build user prompt
     user_prompt = f"""
 You are a professional web developer assistant.
 
@@ -171,11 +165,14 @@ You are a professional web developer assistant.
 """
 
     model_name = "gemini-1.5-flash"
+
     try:
+        # ✅ New official SDK syntax
         response = client.models.generate_content(
             model=model_name,
             contents=user_prompt
         )
+
         text = response.text or ""
         print("✅ Generated code using Gemini API.")
     except Exception as e:
@@ -193,6 +190,7 @@ You are a professional web developer assistant.
 {generate_readme_fallback(brief, checks, attachments_meta, round_num)}
 """
 
+    # Split code and README
     if "---README.md---" in text:
         code_part, readme_part = text.split("---README.md---", 1)
         code_part = _strip_code_block(code_part)
