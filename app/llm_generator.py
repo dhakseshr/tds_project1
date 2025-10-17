@@ -3,20 +3,29 @@ import base64
 import mimetypes
 from pathlib import Path
 from datetime import datetime
+
+# Use the Gemini / Google GenAI SDK
+# Install via: pip install google-genai
+from google import genai
+from google.genai import types
+
+# Load environment variables (e.g. from .env)
 from dotenv import load_dotenv
-from openai import OpenAI
-
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") # <-- Add this line
 
-client = OpenAI(
-    api_key=OPENAI_API_KEY,
-    base_url=OPENAI_BASE_URL  # <-- Add this parameter
-)
+# Read your Gemini API key (you may store it e.g. as GEMINI_API_KEY)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise RuntimeError("Please set GEMINI_API_KEY in your environment")
 
+# Configure the genai client
+genai.configure(api_key=GEMINI_API_KEY)
+client = genai.Client()
+
+# Directory for saving attachments
 TMP_DIR = Path("/tmp/llm_attachments")
 TMP_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def decode_attachments(attachments):
     """
@@ -47,12 +56,13 @@ def decode_attachments(attachments):
             print("Failed to decode attachment", name, e)
     return saved
 
-def summarize_attachment_meta(saved):
+
+def summarize_attachments_meta(saved):
     """
     saved is list from decode_attachments.
     Returns a short human-readable summary string for the prompt.
     """
-    summaries = []
+    lines = []
     for s in saved:
         nm = s["name"]
         p = s["path"]
@@ -61,27 +71,33 @@ def summarize_attachment_meta(saved):
             if mime.startswith("text") or nm.endswith((".md", ".txt", ".json", ".csv")):
                 with open(p, "r", encoding="utf-8", errors="ignore") as f:
                     if nm.endswith(".csv"):
-                        lines = [next(f).strip() for _ in range(3)]
-                        preview = "\\n".join(lines)
+                        # read first few lines
+                        preview_lines = []
+                        for _ in range(3):
+                            try:
+                                preview_lines.append(next(f).strip())
+                            except StopIteration:
+                                break
+                        preview = "\\n".join(preview_lines)
                     else:
                         data = f.read(1000)
                         preview = data.replace("\n", "\\n")[:1000]
-                summaries.append(f"- {nm} ({mime}): preview: {preview}")
+                lines.append(f"- {nm} ({mime}): preview: {preview}")
             else:
-                summaries.append(f"- {nm} ({mime}): {s['size']} bytes")
+                lines.append(f"- {nm} ({mime}): {s['size']} bytes")
         except Exception as e:
-            summaries.append(f"- {nm} ({mime}): (could not read preview: {e})")
-    return "\\n".join(summaries)
+            lines.append(f"- {nm} ({mime}): (could not read: {e})")
+    return "\\n".join(lines)
+
 
 def _strip_code_block(text: str) -> str:
-    """
-    If text is inside triple-backticks, return inner contents. Otherwise return text as-is.
-    """
+    """If text is inside triple-backticks, return the inner portion; else return as-is."""
     if "```" in text:
         parts = text.split("```")
         if len(parts) >= 2:
             return parts[1].strip()
     return text.strip()
+
 
 def generate_readme_fallback(brief: str, checks=None, attachments_meta=None, round_num=1):
     checks_text = "\\n".join(checks or [])
@@ -101,22 +117,29 @@ def generate_readme_fallback(brief: str, checks=None, attachments_meta=None, rou
 2. No build steps required.
 
 ## Notes
-This README was generated as a fallback (OpenAI did not return an explicit README).
+This README was generated as a fallback (Gemini did not return an explicit README).
 """
 
-def generate_app_code(brief: str, attachments=None, checks=None, round_num=1, prev_readme=None):
+
+def generate_app_code(brief: str, attachments=None, checks=None,
+                      round_num=1, prev_readme=None):
     """
-    Generate or revise an app using the OpenAI Responses API.
+    Generate (or revise) an app using Gemini.
+
     - round_num=1: build from scratch
     - round_num=2: refactor based on new brief and previous README/code
     """
     saved = decode_attachments(attachments or [])
-    attachments_meta = summarize_attachment_meta(saved)
+    attachments_meta = summarize_attachments_meta(saved)
 
     context_note = ""
     if round_num == 2 and prev_readme:
-        context_note = f"\n### Previous README.md:\n{prev_readme}\n\nRevise and enhance this project according to the new brief below.\n"
+        context_note = (
+            f"\n### Previous README.md:\n{prev_readme}\n\n"
+            "Revise and enhance this project according to the new brief below.\n"
+        )
 
+    # Build the user prompt to send to Gemini
     user_prompt = f"""
 You are a professional web developer assistant.
 
@@ -147,24 +170,22 @@ You are a professional web developer assistant.
 4. Do not include any commentary outside code or README.
 """
 
+    model_name = "gemini-1.5-flash"
     try:
-        response = client.responses.create(
-            model="gpt-5",
-            input=[
-                {"role": "system", "content": "You are a helpful coding assistant that outputs runnable web apps."},
-                {"role": "user", "content": user_prompt}
-            ]
+        response = client.models.generate_content(
+            model=model_name,
+            contents=user_prompt
         )
-        text = response.output_text or ""
-        print("✅ Generated code using new OpenAI Responses API.")
+        text = response.text or ""
+        print("✅ Generated code using Gemini API.")
     except Exception as e:
-        print("⚠ OpenAI API failed, using fallback HTML instead:", e)
+        print("⚠ Gemini API failed, using fallback HTML instead:", e)
         text = f"""
 <html>
   <head><title>Fallback App</title></head>
   <body>
     <h1>Hello (fallback)</h1>
-    <p>This app was generated as a fallback because OpenAI failed. Brief: {brief}</p>
+    <p>This is fallback because Gemini failed. Brief: {brief}</p>
   </body>
 </html>
 
