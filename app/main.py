@@ -62,7 +62,9 @@ def process_request(data):
     saved_info = gen.get("attachments", [])
 
     # Step 1: Get or create repo
-    repo = create_repo(task_id, description=f"Auto-generated app for task: {data['brief']}")
+    # Truncate the brief to a safe length for the GitHub description
+    brief_summary = data['brief'][:250]
+    repo = create_repo(task_id, description=f"Auto-generated app for task: {brief_summary}")
 
     # Step 2: Round-specific logic
     if round_num == 1:
