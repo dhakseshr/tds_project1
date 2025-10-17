@@ -1,27 +1,22 @@
 import os
 import base64
+import mimetypes
 from pathlib import Path
-from dotenv import load_dotenv
 from datetime import datetime
+from dotenv import load_dotenv
+from openai import OpenAI
 
-# Install this via: pip install google-genai python-dotenv
-from google import genai
-
-# Load environment variables
 load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") # <-- Add this line
 
-# Read Gemini API key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise RuntimeError("❌ Please set GEMINI_API_KEY in your environment or Space secrets.")
+client = OpenAI(
+    api_key=OPENAI_API_KEY,
+    base_url=OPENAI_BASE_URL  # <-- Add this parameter
+)
 
-# Initialize Gemini client (new official SDK style)
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-# Directory for saving attachments
 TMP_DIR = Path("/tmp/llm_attachments")
 TMP_DIR.mkdir(parents=True, exist_ok=True)
-
 
 def decode_attachments(attachments):
     """
@@ -49,15 +44,15 @@ def decode_attachments(attachments):
                 "size": len(data)
             })
         except Exception as e:
-            print("⚠ Failed to decode attachment", name, e)
+            print("Failed to decode attachment", name, e)
     return saved
 
-
-def summarize_attachments_meta(saved):
+def summarize_attachment_meta(saved):
     """
-    Summarizes decoded attachments for the prompt.
+    saved is list from decode_attachments.
+    Returns a short human-readable summary string for the prompt.
     """
-    lines = []
+    summaries = []
     for s in saved:
         nm = s["name"]
         p = s["path"]
@@ -66,35 +61,29 @@ def summarize_attachments_meta(saved):
             if mime.startswith("text") or nm.endswith((".md", ".txt", ".json", ".csv")):
                 with open(p, "r", encoding="utf-8", errors="ignore") as f:
                     if nm.endswith(".csv"):
-                        preview_lines = []
-                        for _ in range(3):
-                            try:
-                                preview_lines.append(next(f).strip())
-                            except StopIteration:
-                                break
-                        preview = "\\n".join(preview_lines)
+                        lines = [next(f).strip() for _ in range(3)]
+                        preview = "\\n".join(lines)
                     else:
                         data = f.read(1000)
                         preview = data.replace("\n", "\\n")[:1000]
-                lines.append(f"- {nm} ({mime}): preview: {preview}")
+                summaries.append(f"- {nm} ({mime}): preview: {preview}")
             else:
-                lines.append(f"- {nm} ({mime}): {s['size']} bytes")
+                summaries.append(f"- {nm} ({mime}): {s['size']} bytes")
         except Exception as e:
-            lines.append(f"- {nm} ({mime}): (could not read: {e})")
-    return "\\n".join(lines)
-
+            summaries.append(f"- {nm} ({mime}): (could not read preview: {e})")
+    return "\\n".join(summaries)
 
 def _strip_code_block(text: str) -> str:
-    """Remove markdown code fences if present."""
+    """
+    If text is inside triple-backticks, return inner contents. Otherwise return text as-is.
+    """
     if "```" in text:
         parts = text.split("```")
         if len(parts) >= 2:
             return parts[1].strip()
     return text.strip()
 
-
 def generate_readme_fallback(brief: str, checks=None, attachments_meta=None, round_num=1):
-    """Fallback README if Gemini call fails."""
     checks_text = "\\n".join(checks or [])
     att_text = attachments_meta or ""
     return f"""# Auto-generated README (Round {round_num})
@@ -112,28 +101,22 @@ def generate_readme_fallback(brief: str, checks=None, attachments_meta=None, rou
 2. No build steps required.
 
 ## Notes
-This README was generated as a fallback (Gemini did not return an explicit README).
+This README was generated as a fallback (OpenAI did not return an explicit README).
 """
 
-
-def generate_app_code(brief: str, attachments=None, checks=None,
-                      round_num=1, prev_readme=None):
+def generate_app_code(brief: str, attachments=None, checks=None, round_num=1, prev_readme=None):
     """
-    Generate or revise a web app using Gemini.
-    round_num=1: build from scratch
-    round_num=2: refactor based on new brief and previous README/code
+    Generate or revise an app using the OpenAI Responses API.
+    - round_num=1: build from scratch
+    - round_num=2: refactor based on new brief and previous README/code
     """
     saved = decode_attachments(attachments or [])
-    attachments_meta = summarize_attachments_meta(saved)
+    attachments_meta = summarize_attachment_meta(saved)
 
     context_note = ""
     if round_num == 2 and prev_readme:
-        context_note = (
-            f"\n### Previous README.md:\n{prev_readme}\n\n"
-            "Revise and enhance this project according to the new brief below.\n"
-        )
+        context_note = f"\n### Previous README.md:\n{prev_readme}\n\nRevise and enhance this project according to the new brief below.\n"
 
-    # Build user prompt
     user_prompt = f"""
 You are a professional web developer assistant.
 
@@ -164,25 +147,24 @@ You are a professional web developer assistant.
 4. Do not include any commentary outside code or README.
 """
 
-    model_name = "gemini-2.5-flash"
-
     try:
-        # ✅ New official SDK syntax
-        response = client.models.generate_content(
-            model=model_name,
-            contents=user_prompt
+        response = client.responses.create(
+            model="gpt-5",
+            input=[
+                {"role": "system", "content": "You are a helpful coding assistant that outputs runnable web apps."},
+                {"role": "user", "content": user_prompt}
+            ]
         )
-
-        text = response.text or ""
-        print("✅ Generated code using Gemini API.")
+        text = response.output_text or ""
+        print("✅ Generated code using new OpenAI Responses API.")
     except Exception as e:
-        print("⚠ Gemini API failed, using fallback HTML instead:", e)
+        print("⚠ OpenAI API failed, using fallback HTML instead:", e)
         text = f"""
 <html>
   <head><title>Fallback App</title></head>
   <body>
     <h1>Hello (fallback)</h1>
-    <p>This is fallback because Gemini failed. Brief: {brief}</p>
+    <p>This app was generated as a fallback because OpenAI failed. Brief: {brief}</p>
   </body>
 </html>
 
@@ -190,7 +172,6 @@ You are a professional web developer assistant.
 {generate_readme_fallback(brief, checks, attachments_meta, round_num)}
 """
 
-    # Split code and README
     if "---README.md---" in text:
         code_part, readme_part = text.split("---README.md---", 1)
         code_part = _strip_code_block(code_part)
