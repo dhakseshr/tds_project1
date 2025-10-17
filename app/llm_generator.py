@@ -19,8 +19,8 @@ if not GEMINI_API_KEY:
     raise RuntimeError("Please set GEMINI_API_KEY in your environment")
 
 # Configure the genai client
-genai.configure(api_key=GEMINI_API_KEY)
-client = genai.Client()
+client = genai.Client(api_key=GEMINI_API_KEY)
+
 
 # Directory for saving attachments
 TMP_DIR = Path("/tmp/llm_attachments")
