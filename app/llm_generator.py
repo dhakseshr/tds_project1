@@ -164,7 +164,7 @@ You are a professional web developer assistant.
 4. Do not include any commentary outside code or README.
 """
 
-    model_name = "gemini-1.5-flash"
+    model_name = "gemini-2.5-flash"
 
     try:
         # ✅ New official SDK syntax
