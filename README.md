@@ -1,11 +1,12 @@
----
-title: Llm Code Deployment
-emoji: 🏢
-colorFrom: red
-colorTo: indigo
-sdk: docker
-pinned: false
-license: mit
----
+you can run like this ..
 
-Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+1 - make a virtual env first
+
+2 - install all requirements 
+
+3 - run the below command 
+
+
+uvicorn app.main:app --reload
+
+
