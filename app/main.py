@@ -63,7 +63,7 @@ def process_request(data):
 
     # Step 1: Get or create repo
     # Truncate the brief to a safe length for the GitHub description
-    brief_summary = data['brief'][:250]
+    brief_summary = data['brief'].replace("\n", " ").strip()[:250] 
     repo = create_repo(task_id, description=f"Auto-generated app for task: {brief_summary}")
 
     # Step 2: Round-specific logic
